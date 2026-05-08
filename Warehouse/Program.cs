@@ -1,4 +1,6 @@
 using StackExchange.Redis;
+using Warehouse.Services;
+using Warehouse.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -10,6 +12,8 @@ builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+builder.Services.AddScoped<IWarehouseService, Warehouse.Services.WarehouseService>();
 
 var app = builder.Build();
 
