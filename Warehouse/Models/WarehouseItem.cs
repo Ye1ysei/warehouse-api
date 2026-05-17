@@ -2,9 +2,9 @@
 {
     public class WarehouseItem
     {
-        public string Name { get; set; }
-        public string SKU { get; set; }
-        public string Category { get; set; }
+        public required string Name { get; set; }
+        public required string SKU { get; set; }
+        public required string Category { get; set; }
         public int Quantity { get; set; }
     }
 }

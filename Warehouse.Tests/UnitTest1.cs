@@ -1,17 +1,27 @@
 ﻿namespace Warehouse.Tests;
 
 using Warehouse.Models;
+using Warehouse.Services;
 using Xunit;
 using Moq;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using StackExchange.Redis;
 using System.Threading.Tasks;
 using System.Collections.Generic;
-using System.Linq;
 
 public class WarehouseTests
 {
+  
+    private static (MainController controller, Mock<IWarehouseService> serviceMock) CreateController()
+    {
+        var serviceMock = new Mock<IWarehouseService>();
+        var loggerMock = new Mock<ILogger<MainController>>();
+        var controller = new MainController(serviceMock.Object, loggerMock.Object);
+        return (controller, serviceMock);
+    }
+
+    // --- Model ---
+
     [Fact]
     public void CreateProduct_ShouldSetValues()
     {
@@ -29,85 +39,156 @@ public class WarehouseTests
         Assert.Equal(10, product.Quantity);
     }
 
+    // --- Add ---
 
     [Fact]
-    public async Task DeleteProduct_ShouldReturnOk_WhenKeyIsDeleted()
+    public async Task Add_ShouldReturnOk_WithId()
     {
-        var dbMock = new Mock<IDatabase>();
-        var redisMock = new Mock<IConnectionMultiplexer>();
-        var loggerMock = new Mock<ILogger<MainController>>();
+        var (controller, serviceMock) = CreateController();
 
-        redisMock.Setup(x => x.GetDatabase(It.IsAny<int>(), It.IsAny<object>()))
-                 .Returns(dbMock.Object);
+        serviceMock
+            .Setup(s => s.AddProductAsync(It.IsAny<WarehouseItem>()))
+            .ReturnsAsync(42L);
 
-        dbMock.Setup(x => x.KeyDeleteAsync(It.IsAny<RedisKey>(), It.IsAny<CommandFlags>()))
-              .ReturnsAsync(true);
+        var result = await controller.Add(new WarehouseItem { Name = "Apple", SKU = "A1", Category = "Food", Quantity = 10 });
 
-        var controller = new MainController(redisMock.Object, loggerMock.Object);
-        var result = await controller.deleteProduct(1);
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.Contains("42", ok.Value!.ToString());
+    }
+
+    // --- Delete ---
+
+    [Fact]
+    public async Task DeleteProduct_ShouldReturnOk_WhenProductExists()
+    {
+        var (controller, serviceMock) = CreateController();
+
+        serviceMock
+            .Setup(s => s.DeleteProductAsync(1))
+            .ReturnsAsync(true);
+
+        var result = await controller.DeleteProduct(1);
 
         Assert.IsType<OkObjectResult>(result);
-        dbMock.Verify(x => x.ListRemoveAsync("product:list", 1, 0, CommandFlags.None), Times.Once);
+        serviceMock.Verify(s => s.DeleteProductAsync(1), Times.Once);
     }
+
+    [Fact]
+    public async Task DeleteProduct_ShouldReturnNotFound_WhenProductMissing()
+    {
+        var (controller, serviceMock) = CreateController();
+
+        serviceMock
+            .Setup(s => s.DeleteProductAsync(99))
+            .ReturnsAsync(false);
+
+        var result = await controller.DeleteProduct(99);
+
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    // --- GetProduct ---
+
+    [Fact]
+    public async Task GetProduct_ShouldReturnOk_WhenProductExists()
+    {
+        var (controller, serviceMock) = CreateController();
+
+        serviceMock
+            .Setup(s => s.GetProductAsync(1))
+            .ReturnsAsync(new Dictionary<string, string>
+            {
+                { "name", "Apple" },
+                { "SKU", "A1" },
+                { "Category", "Food" },
+                { "Quantity", "10" }
+            });
+
+        var result = await controller.GetProduct(1);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(ok.Value);
+    }
+
+    [Fact]
+    public async Task GetProduct_ShouldReturnNotFound_WhenMissing()
+    {
+        var (controller, serviceMock) = CreateController();
+
+        serviceMock
+            .Setup(s => s.GetProductAsync(99))
+            .ReturnsAsync((Dictionary<string, string>?)null);
+
+        var result = await controller.GetProduct(99);
+
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    // --- GetAllProducts ---
 
     [Fact]
     public async Task GetAllProducts_ShouldReturnList_WhenProductsExist()
     {
+        var (controller, serviceMock) = CreateController();
 
-        var dbMock = new Mock<IDatabase>();
-        var redisMock = new Mock<IConnectionMultiplexer>();
-        var loggerMock = new Mock<ILogger<MainController>>();
+        serviceMock
+            .Setup(s => s.GetAllProductsAsync())
+            .ReturnsAsync(new List<object> { new { Id = "1", Name = "Apple" } });
 
-        redisMock.Setup(x => x.GetDatabase(It.IsAny<int>(), It.IsAny<object>())).Returns(dbMock.Object);
+        var result = await controller.GetAllProducts();
 
-        var redisIds = new RedisValue[] { "1" };
-        dbMock.Setup(x => x.ListRangeAsync("product:list", 0, -1, CommandFlags.None))
-              .ReturnsAsync(redisIds);
-
-        var hashEntries = new HashEntry[]
-        {
-        new HashEntry("name", "Apple"),
-        new HashEntry("SKU", "A1"),
-        new HashEntry("Category", "Food"),
-        new HashEntry("Quantity", "10")
-        };
-        dbMock.Setup(x => x.HashGetAllAsync("product:1", CommandFlags.None))
-              .ReturnsAsync(hashEntries);
-
-        var controller = new MainController(redisMock.Object, loggerMock.Object);
-
-        var result = await controller.getAllProducts();
-
-        var okResult = Assert.IsType<OkObjectResult>(result);
-        var list = Assert.IsType<List<object>>(okResult.Value);
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var list = Assert.IsType<List<object>>(ok.Value);
         Assert.Single(list);
     }
 
     [Fact]
+    public async Task GetAllProducts_ShouldReturnEmptyList_WhenNoProducts()
+    {
+        var (controller, serviceMock) = CreateController();
+
+        serviceMock
+            .Setup(s => s.GetAllProductsAsync())
+            .ReturnsAsync(new List<object>());
+
+        var result = await controller.GetAllProducts();
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var list = Assert.IsType<List<object>>(ok.Value);
+        Assert.Empty(list);
+    }
+
+    // --- SearchProduct ---
+
+    [Fact]
     public async Task SearchProduct_ShouldReturnOnlyMatchedItems()
     {
-        var dbMock = new Mock<IDatabase>();
-        var redisMock = new Mock<IConnectionMultiplexer>();
-        var loggerMock = new Mock<ILogger<MainController>>();
+        var (controller, serviceMock) = CreateController();
 
-        redisMock.Setup(x => x.GetDatabase(It.IsAny<int>(), It.IsAny<object>())).Returns(dbMock.Object);
+        serviceMock
+            .Setup(s => s.SearchProductsAsync("Appl"))
+            .ReturnsAsync(new List<object> { new { Id = "1", Name = "Apple" } });
 
-        dbMock.Setup(x => x.ListRangeAsync("product:list", 0, -1, It.IsAny<CommandFlags>()))
-              .ReturnsAsync(new RedisValue[] { "1", "2" });
+        var result = await controller.SearchProduct("Appl");
 
-        dbMock.Setup(x => x.HashGetAllAsync("product:1", It.IsAny<CommandFlags>()))
-              .ReturnsAsync(new HashEntry[] { new HashEntry("name", "Apple"), new HashEntry("Category", "Fruit") });
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var list = Assert.IsType<List<object>>(ok.Value);
+        Assert.Single(list);
+    }
 
-        dbMock.Setup(x => x.HashGetAllAsync("product:2", It.IsAny<CommandFlags>()))
-              .ReturnsAsync(new HashEntry[] { new HashEntry("name", "Banana"), new HashEntry("Category", "Fruit") });
+    [Fact]
+    public async Task SearchProduct_ShouldReturnEmpty_WhenNoMatch()
+    {
+        var (controller, serviceMock) = CreateController();
 
-        var controller = new MainController(redisMock.Object, loggerMock.Object);
+        serviceMock
+            .Setup(s => s.SearchProductsAsync("xyz"))
+            .ReturnsAsync(new List<object>());
 
-        var result = await controller.searchProduct("Appl");
+        var result = await controller.SearchProduct("xyz");
 
-        var okResult = Assert.IsType<OkObjectResult>(result);
-        var products = Assert.IsType<List<object>>(okResult.Value);
-
-        Assert.Single(products);
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var list = Assert.IsType<List<object>>(ok.Value);
+        Assert.Empty(list);
     }
 }

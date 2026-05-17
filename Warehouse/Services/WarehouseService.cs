@@ -26,10 +26,10 @@ namespace Warehouse.Services
 
             await db.HashSetAsync($"product:{id}", new HashEntry[]
             {
-        new HashEntry("name", product.Name),
-        new HashEntry("SKU", product.SKU),
-        new HashEntry("Category", product.Category),
-        new HashEntry("Quantity", product.Quantity)
+                new HashEntry("name", product.Name),
+                new HashEntry("SKU", product.SKU),
+                new HashEntry("Category", product.Category),
+                new HashEntry("Quantity", product.Quantity)
             });
 
             await db.ListRightPushAsync("product:list", id);
